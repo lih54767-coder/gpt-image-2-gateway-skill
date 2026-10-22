@@ -135,7 +135,8 @@ def _config_dir() -> Path:
         return directory
     if os.name == 'nt':
         # Keep credentials under the per-user local profile, not in the repository.
-        return Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local'))) / 'gpt-image-2-skill'
+        local_app_data = os.environ.get('LOCALAPPDATA')
+        return (Path(local_app_data) if local_app_data else Path.home() / 'AppData' / 'Local') / 'gpt-image-2-skill'
     return Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home() / '.config'))) / 'gpt-image-2-skill'
 
 
