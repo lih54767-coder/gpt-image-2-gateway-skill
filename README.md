@@ -1,5 +1,7 @@
 # GPT Image 2 Gateway Skill
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 A portable [Agent Skill](https://agentskills.io/specification) with a local Python CLI for **one OpenAI-compatible gateway exposing `gpt-image-2`**. Each user configures their gateway URL and API key once; subsequent agent calls need neither value. No MCP server, hosted service, or multi-model registry is required.
 
 The skill does **not** provide a gateway or an API key. It sends image requests only to the URL you configure and has no silent fallback to another image provider.
