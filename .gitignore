@@ -1,0 +1,20 @@
+# Never publish local credentials or agent environment.
+.env
+.env.*
+!.env.example
+key
+config.json
+.venv*/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+output/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+.DS_Store

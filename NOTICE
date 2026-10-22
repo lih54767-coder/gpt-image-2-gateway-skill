@@ -1,0 +1,12 @@
+GPT Image 2 Gateway Skill
+
+Portions of scripts/gateway_prompt.py adapt the prompt augmentation, filename and
+thumbnail helper routines from OpenAI's imagegen skill:
+https://github.com/openai/skills/tree/main/skills/.system/imagegen
+Original source: scripts/image_gen.py
+License: Apache License, Version 2.0 (see LICENSE).
+
+The adapted functions were extracted, simplified and modified for this
+standalone gateway-only implementation. The original CLI is not distributed
+in this repository. This attribution does not imply affiliation with or
+endorsement by OpenAI.
