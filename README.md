@@ -18,9 +18,19 @@ python3 -m venv .venv
 .venv/bin/python scripts/image_gen_gateway.py generate --prompt 'A blue triangle on white paper' --out ./output/triangle.png
 ```
 
-`configure` prompts privately for the gateway **API key**; do **not** paste it into chat or put it on the command line. For noninteractive deployment, inject it into a temporary environment variable using your secret manager and run `configure --base-url URL --key-env VARIABLE_NAME` (the CLI argument is the **name**, not the secret). On Windows use `.venv/Scripts/python.exe` in place of `.venv/bin/python`.
+`configure` prompts privately for the gateway **API key**; do **not** paste it into chat or put it on the command line. For noninteractive deployment, inject it into a temporary environment variable using your secret manager and run `configure --base-url URL --key-env VARIABLE_NAME` (the CLI argument is the **name**, not the secret). On Windows 11, open PowerShell in the cloned directory and use:
 
-The CLI saves `config.json` (URL and optional Responses host model) and `key` (private API key) under `${XDG_CONFIG_HOME:-~/.config}/gpt-image-2-skill/`, with mode `0600` on Unix. Those files are **outside this repository**. `IMAGE2_CONFIG_DIR=/absolute/path` isolates agents sharing an OS account; `IMAGE2_API_KEY` overrides the saved key for an invocation. Do not confuse this gateway key with a public browser key or your agent's chat-model key.
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe scripts\image_gen_gateway.py configure --base-url https://YOUR-GATEWAY.example/v1
+.\.venv\Scripts\python.exe scripts\image_gen_gateway.py status
+.\.venv\Scripts\python.exe scripts\image_gen_gateway.py generate --prompt "A blue triangle on white paper" --out .\output\triangle.png
+```
+
+The key is entered only during the first `configure` (or when changing it).
+
+The CLI saves `config.json` (URL and optional Responses host model) and `key` (private API key) outside this repository: under `${XDG_CONFIG_HOME:-~/.config}/gpt-image-2-skill/` with mode `0600` on Unix, or `%LOCALAPPDATA%\gpt-image-2-skill\` with per-user inherited ACLs on Windows. `IMAGE2_CONFIG_DIR=/absolute/path` isolates agents sharing an OS account; `IMAGE2_API_KEY` overrides the saved key for an invocation. Do not confuse this gateway key with a public browser key or your agent's chat-model key.
 
 To install as an agent skill, place this repository directory in your agent's skills path so it can discover `SKILL.md`. The agent must be able to execute local scripts and reach your configured gateway. Configure once on **the agent's machine**; credentials are not transferred by cloning the repository. See [SKILL.md](SKILL.md) for the agent workflow.
 

@@ -30,11 +30,18 @@ class Image2Contract(unittest.TestCase):
             self.assertEqual(g.main(['configure', '--base-url', 'https://one.example/v1', '--key-env', 'IMAGE2_SETUP_KEY']), 0)
             self.assertEqual(g._client().base_url.host, 'one.example')
             self.assertEqual(g._client().api_key, 'test-only-key')
-            self.assertEqual(stat.S_IMODE((Path(tmp) / 'key').stat().st_mode), 0o600)
+            self.assertTrue((Path(tmp) / 'key').is_file())
+            if os.name != 'nt':
+                self.assertEqual(stat.S_IMODE((Path(tmp) / 'key').stat().st_mode), 0o600)
             self.assertNotIn('test-only-key', (Path(tmp) / 'config.json').read_text())
             os.environ.pop('IMAGE2_SETUP_KEY')
             self.assertEqual(g._client().api_key, 'test-only-key')
             self.assertEqual(g.main(['status']), 0)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows config path')
+    def test_windows_defaults_to_local_app_data(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {'LOCALAPPDATA': tmp}, clear=True):
+            self.assertEqual(g._config_dir(), Path(tmp) / 'gpt-image-2-skill')
 
     def test_unconfigured_no_implicit_real_or_openai_endpoint(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {'IMAGE2_CONFIG_DIR': tmp}, clear=True):
