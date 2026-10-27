@@ -1,12 +1,15 @@
-# 可配置中转站 `gpt-image-2` 工具（下方验收记录仅适用原站）
+# 可配置中转站生图工具（Image 2 / 2.5；下方旧验收记录仅适用原站）
 
-从 skill 目录调用 `python3 scripts/image_gen_gateway.py`。首次在使用者本机运行 `configure --base-url https://YOUR-GATEWAY/v1`，终端私密输入自己的网关 API Key（或 `--key-env VARIABLE_NAME` 从环境导入）；以后不必重复填写。网关 URL/Key 存在 skill 外部的用户私有配置中，详见主 SKILL.md。图片模型固定 `gpt-image-2`，不改 Hermes 主模型，不重启网关。默认不使用聊天模型的 `OPENAI_API_KEY`，也不会改动官方原版 `scripts/image_gen.py`。
+从 skill 目录调用 `python3 scripts/image_gen_gateway.py`。首次在使用者本机运行 `configure --base-url https://YOUR-GATEWAY/v1`，终端私密输入自己的网关 API Key（或 `--key-env VARIABLE_NAME` 从环境导入）；以后不必重复填写。`configure` 会调用网关 `/v1/models` 探测支持的生图型号并缓存（`available_models`）；探测失败则不写入任何配置并报错，不会静默降级。`--model auto`（CLI 默认值）按缓存选模：有 2.5 时正式图/精修用 `gpt-image-2.5-sunburst`，快稿和 `--quality low` 用 `gpt-image-2.5-flare`，网关只报 Image 2 时一律用 `gpt-image-2`；显式 `--model` 永不替换。网关型号变化时重跑 `configure` 刷新缓存。不改 Hermes 主模型，不重启网关；默认不使用聊天模型的 `OPENAI_API_KEY`，也不会改动官方原版 `scripts/image_gen.py`。
 
 依赖：Python 3.11+，安装 `requirements.txt`；按主 SKILL.md 创建 `.venv` 后使用 `.venv/bin/python scripts/image_gen_gateway.py ...`，或先激活 venv 再使用下方 `python3` 示例。回归测试：从 skill 目录运行 `.venv/bin/python -m unittest discover -s tests -q`。可移植运行只需 `scripts/image_gen_gateway.py`、`scripts/gateway_image2.py`、`scripts/gateway_prompt.py`。下方示例须在 skill 目录执行，路径和输出目录按本机实际情况替换。**“本中转站/网关实测”均指原站的历史验收，别的站必须独立冒烟测试。**
 
 ## 可复制命令
 
 ```bash
+python3 scripts/image_gen_gateway.py generate --model gpt-image-2.5-sunburst --prompt 'A modern Japanese RPG pixel-art izakaya interior, playable overhead tile map' --size 1536x1024 --quality high --out ./output/imagegen/tavern.png
+python3 scripts/image_gen_gateway.py generate --model gpt-image-2.5-flare --prompt 'Quick pixel-art izakaya layout draft' --quality low --out ./output/imagegen/tavern-draft.png
+python3 scripts/image_gen_gateway.py generate --model gpt-image-2 --prompt 'Legacy-compatible red apple' --out ./output/imagegen/legacy.png
 python3 scripts/image_gen_gateway.py generate --prompt 'A natural-light portrait' --size 1024x1024 --quality medium --out ./output/imagegen/portrait.png
 python3 scripts/image_gen_gateway.py edit --image /path/to/source.png --prompt 'Change the background only' --out ./output/imagegen/edit.png
 python3 scripts/image_gen_gateway.py edit --image /path/to/target.png --image /path/to/reference.png --prompt 'Edit image 1 using image 2 as a color reference' --out ./output/imagegen/multi.png
@@ -19,20 +22,25 @@ python3 scripts/image_gen_gateway.py tool --image ./output/imagegen/pear.png --p
 python3 scripts/image_gen_gateway.py tool --prompt 'Draw a single purple plum on white' --stream --partial-images 2 --quality low --out ./output/imagegen/plum.png
 ```
 
-`tool` 是独立的 Responses API 图像工具路径：原站使用 `gpt-6-astra` 作为宿主模型，图像工具固定 `gpt-image-2`。其他中转站在 `configure --host-model MODEL` 时指定其可用的 Responses 宿主模型，或单次用 `--mainline-model MODEL` 覆盖；未指定则默认尝试 `gpt-6-astra`，**不保证别的站支持此路径**。强制 `--action edit`＋本地 `--image` 已在原站验收成功。**可靠的续改方式是把上轮输出文件再用 `--image` 传入**；本中转站仅给 `--previous-response-id`、不给图片会报 502，且 GET `/v1/responses/{id}` 返回 404，脚本现在本地拒绝这种用法。带 ID 又带本地图可生图，但未证明 ID 历史真的被利用。`--image-url` 已实测 Wikimedia 的 HTTPS 图片可供上游下载并编辑（右下角增加蓝圈）；另一个 OpenAI 文档站的图片在上游报“Failed to download file”（400），具体 URL 要以实际可下载为准。`--file-id` 的前置上传到网关 `/v1/files` 报“Model name not specified”（400），因此 File ID 入口已实现协议构造、**当前网关未打通**。日常编辑首选 Images `edit`；对话式图片编辑用 `tool --image`。
+`tool` 是独立的 Responses API 图像工具路径：原站曾用 `gpt-6-astra` 作为宿主模型，旧版图像工具 `gpt-image-2` 已验收；**Sunburst 2.5 的 `tool` 生成和带本地 `--image --action edit` 续改也已实测产图**。Flare 的 `tool` 路径仅通过离线单测，尚未在本站公网单独实测。图片要直调时使用 `generate` / `edit`，其顶层 `model` 就是指定的图片模型。其他中转站在 `configure --host-model MODEL` 时指定其可用的 Responses 宿主模型，或单次用 `--mainline-model MODEL` 覆盖；未指定则默认尝试 `gpt-6-astra`，**不保证别的站支持此路径**。强制 `--action edit`＋本地 `--image` 已在原站验收成功。**可靠的续改方式是把上轮输出文件再用 `--image` 传入**；本中转站仅给 `--previous-response-id`、不给图片会报 502，且 GET `/v1/responses/{id}` 返回 404，脚本现在本地拒绝这种用法。带 ID 又带本地图可生图，但未证明 ID 历史真的被利用。`--image-url` 已实测 Wikimedia 的 HTTPS 图片可供上游下载并编辑（右下角增加蓝圈）；另一个 OpenAI 文档站的图片在上游报“Failed to download file”（400），具体 URL 要以实际可下载为准。`--file-id` 的前置上传到网关 `/v1/files` 报“Model name not specified”（400），因此 File ID 入口已实现协议构造、**当前网关未打通**。日常编辑首选 Images `edit`；对话式图片编辑用 `tool --image`。
 
 ## 参数、输入及验证
 
 - Images `generate`：文字；`edit`：第一张本地目标图，可多次 `--image` 附加参考图（支持 PNG/JPEG/WebP）；`--mask` 为**同第一张实际尺寸**的带 alpha PNG（透明区域是编辑区域）。生成后需目视确认不变量。
-- `--size`：auto 或满足 GPT Image 2 约束的 WIDTHxHEIGHT（边为 16 倍数、长边不超过 3840、比例不超过 3:1、总像素 655360~8294400）；模型**实际返回尺寸可能不等于请求尺寸**。制作编辑遮罩时先读实际源图尺寸。
-- `--quality auto|low|medium|high`、`--background auto|opaque|transparent`、`--output-format png|jpeg|webp`、JPEG/WebP `--output-compression 0..100`、`--moderation auto|low`；透明背景不能用 JPEG。`--output-format jpeg --out x.jpg` 或 `.jpeg` 均可。图片会做格式、可解码与输出数量校验，不覆盖既有文件（除非 `--force`）。
+- `--size`：auto 或满足 CLI 原有 Image 2 检查的 WIDTHxHEIGHT（边为 16 倍数、长边不超过 3840、比例不超过 3:1、总像素 655360~8294400）；这是**本地参数检查，不保证每个模型/网关接受所有尺寸**。Image 2.5 在原站已验收 1536x1024。模型实际返回尺寸可能不等于请求尺寸；制作编辑遮罩时先读实际源图尺寸。
+- `--model`：`auto`（默认；按 `configure` 探测缓存的网关型号自动选：单图正式图/精修 Sunburst、单图 `--quality low` 快稿和默认批量 Flare、仅 Image 2 时回退 Image 2）、或显式 `gpt-image-2` / `gpt-image-2.5-flare` / `gpt-image-2.5-sunburst`（显式值永不自动替换）；在 `generate/edit` 中作为 Images API 顶层 `model` 发送，批量 JSONL 可逐行覆盖。明确要求快稿但不用低画质时，请显式传 `--model gpt-image-2.5-flare`（无 2.5 的站改用 auto）；`tool` 路径的 auto 解析为正式图意图（Sunburst 优先）。缓存写入用户私有 `config.json`，不含密钥；网关型号变化时重跑 `configure`。JSONL 中其他型号会在请求前拒绝，失败不自动换模型。
+- `--quality auto|low|medium|high`；Image 2.5 另支持 `xhigh|max`（Image 2 不接受）。`--background auto|opaque|transparent`、`--output-format png|jpeg|webp`、JPEG/WebP `--output-compression 0..100`、`--moderation auto|low`；透明背景不能用 JPEG。`--output-format jpeg --out x.jpg` 或 `.jpeg` 均可。图片会做格式、可解码与输出数量校验，不覆盖既有文件（除非 `--force`）。
 - `--n 1..10` 在本中转站**明确拆成 n 次单图请求**（实测网关直接 `n=2` 返回数量不足），任何子请求失败会在落盘整组前报错；因此费用与 n 张调用对应。批量 JSONL 可为单行字符串或字段对象；默认串行，`--concurrency` 1..4。失败不静默重试、无跨渠道 fallback；批次中其它任务可能已成功，查看输出目录。用全新输出目录重跑，避免覆盖。
 - Images `--stream` 的最终图已验证，`--partial-images` 0..3 可请求预览，但实测该路由请求 1 和 2 张时均只回最终图；**图片生成快时官方也允许不返回预览**。Responses `tool --stream --partial-images 2` 已实测收到并即时落盘 2 张局部预览和 1 张最终图（也可能少于请求数）。流式暂不与 Images `--n>1` 组合。预览文件在对应最终图附近、文件名含 `-partial-`；无 `--force` 时预先防覆盖。
 - 旧版提示词 `--augment/--no-augment`、`--use-case`、`--style` 等结构化字段及 `--downscale-max-dim`、`--downscale-suffix` 已保留；默认按旧版增强。`--dry-run` 不调用 API；运行前可用它验证参数。
 - 实测 WebP 请求中转站仍返回 PNG；工具会打印“gateway returned PNG, converting locally to WEBP”，随后本地转换、验证格式，Alpha 保留。**这不是网关原生 WebP 成功**。透明 PNG 实测有 Alpha (0..254)。不得静默把 PNG 改名为 WebP。
-- `--model` 和 `--input-fidelity` 不接受：此入口刻意固定图像模型，而 Image 2 不暴露后者。URL/File ID 的 Images JSON 编辑路径目前没有入口；需要时先验收中转站 API，再加，不能假装支持。
+- `--input-fidelity` 仍不接受。模型由 `--model` 显式限定为三个已支持型号；URL/File ID 的 Images JSON 编辑路径目前没有入口；需要时先验收中转站 API，再加，不能假装支持。
 
-## 真实验收记录（2026-10-22）
+## 2.5 CLI 验收（原站）
+
+同一私有配置下，经便携 CLI 的 Images API 直调，Flare/Sunburst 的单图 `generate` 和 `edit --image` 均成功落盘 PNG 并目视核对。进一步组合验收：**两款 2.5 均通过双图参考＋Alpha 遮罩**（苹果红色主体保留、叶子变蓝；遮罩由源图实际尺寸制作）；Flare `xhigh`、Sunburst `max` 成功产图；Sunburst 透明 PNG、Flare 透明 WebP 的像素 Alpha 均含 0..254（WebP 是可能的本地 PNG→WebP 转换，勿称网关原生 WebP）；Flare 自定义尺寸流式请求收到最终图（未收到局部预览，实际产物与请求尺寸不同）；两款同批 JSONL 各产一张；Sunburst 的 Responses `tool` 生成和 `--image --action edit` 续改也成功产图。**不是所有排列组合都逐项验收**：Flare 的 Responses tool、精确蒙版像素约束、4K 实际尺寸、File ID 上传和历史 Response ID 单独续改未证明可用。`/v1/models` 列出型号只代表广告能力，不能代替各路径实测；未独立读取上游 C2PA 真实型号标识。
+
+## 真实验收记录（2026-10-22；旧 Image 2）
 
 - 公网中转站通过并目视核对：文生水彩红苹果；苹果＋文字加叶；双图参考变蓝苹果；Alpha 遮罩局部加叶；透明 PNG 绿叶；WebP 本地转换后的透明绿叶；流式最终蓝茶杯；2 条 JSONL 产出 3 张（两橙一紫李）；Responses tool 生成黄梨与 `--image`+auto 改蓝梨；Responses 强制 `--action edit --image ...` 改蓝苹果及显式携带本地图续改为绿苹果；Responses `--stream --partial-images 2` 得到 2 张局部预览＋1 张最终紫李；Responses `--image-url` 引用 Wikimedia 样本成功在右下角增加蓝圈；旧提示词增强＋缩略图生成红风筝。
 - 未打通/有限制：Images `n=2` 单请求返回数量不足（工具已改为独立请求）；Responses `gpt-5.5` 宿主 `model_not_found`；仅靠历史 ID 续改缺图片上下文而 502，按 ID 检索图片 404（必须本地 `--image`）；HTTPS URL 图片仅在上游可下载时可用，Wikimedia 成功、OpenAI 文档站示例失败；网关上传视觉 File 的 `/v1/files` 报缺模型名 400；Images 流式未收到预览。旧版强制 edit 的 503 不是稳定失败：同脚本同入口本次复测成功。以上**不是** Image 2 模型自身不支持的证明，只是当前中转站路径的实测结果。

@@ -1,16 +1,12 @@
-# GPT Image 2 中转站 Skill
+# GPT Image Gateway Skill（Image 2 / 2.5）
 
-[简体中文](README.zh-CN.md) | [English](README.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-这是一个可移植的 [Agent Skill](https://agentskills.io/specification)，内置 Python CLI，专门调用**单个兼容 OpenAI 接口、提供 `gpt-image-2` 的中转站**。每位使用者在自己的机器上配置一次中转站 URL 和 API Key，之后 Agent 调用时无需反复填写。不需要 MCP 服务、托管服务或多模型注册系统。
+可移植的 [Agent Skill](https://agentskills.io/specification)＋本地 Python CLI，用**使用者自己配置的 OpenAI 兼容图片中转站**直调 `gpt-image-2`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`。每位使用者首次配置自己的 URL/API Key；不带 MCP、托管服务或内置 Key，也不暗中切换提供方。
 
-本项目**不提供**中转站或 API Key。程序只向你配置的地址发送生图请求，不会在失败时悄悄切到其他生图服务。
+## 安装与首次配置
 
-## 快速开始
-
-需要 Python 3.11+、可连接的兼容中转站，以及该中转站签发的 API Key。
-
-Linux/macOS：
+需要 Python 3.11+、可访问的兼容中转站及其私有 API Key。
 
 ```bash
 git clone https://github.com/lih54767-coder/gpt-image-2-gateway-skill.git
@@ -19,60 +15,46 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python scripts/image_gen_gateway.py configure --base-url https://YOUR-GATEWAY.example/v1
 .venv/bin/python scripts/image_gen_gateway.py status
-.venv/bin/python scripts/image_gen_gateway.py generate --prompt '白纸上的蓝色三角形' --out ./output/triangle.png
+.venv/bin/python scripts/image_gen_gateway.py generate --prompt 'A blue triangle' --out ./output/triangle.png
 ```
 
-Windows 11：在 PowerShell 中运行：
+`configure` 在**本地终端隐藏输入中转站 API Key**，不要把 Key 放进聊天、命令参数或仓库。自动化场景可通过密钥管理器注入临时环境变量，再使用 `--key-env 变量名`。配置时用该 Key 查询这个中转站的 `/v1/models`，将其广告的图片型号缓存于私有配置；认证或网络失败会停止配置，**不会误判为“只有 Image 2”**。型号列表也不能单独证明生图、改图或 Responses 路径全可用，新站点须分别实测。
 
-```powershell
-git clone https://github.com/lih54767-coder/gpt-image-2-gateway-skill.git
-cd gpt-image-2-gateway-skill
-py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe scripts\image_gen_gateway.py configure --base-url https://YOUR-GATEWAY.example/v1
-.\.venv\Scripts\python.exe scripts\image_gen_gateway.py status
-.\.venv\Scripts\python.exe scripts\image_gen_gateway.py generate --prompt "白纸上的蓝色三角形" --out .\output\triangle.png
-```
+`config.json`（URL、缓存型号、可选 Responses 宿主模型）和 `key` 都放在**仓库外**：Unix 为 `${XDG_CONFIG_HOME:-~/.config}/gpt-image-2-skill/`（文件权限 `0600`），Windows 为 `%LOCALAPPDATA%\gpt-image-2-skill\`（当前用户 ACL）。多个 Agent 共用操作系统账号时，用 `IMAGE2_CONFIG_DIR` 隔离。单次 `IMAGE2_API_KEY` 可覆盖已存的 Key；权限变化后须重跑 `configure` 刷新缓存。它不是 Agent 文本模型 Key，更不是公开浏览器 Key。
 
-把 `https://YOUR-GATEWAY.example/v1` 换成你自己的中转站 API 地址。`configure` 会在终端中私密提示输入**中转站 API Key**；它不是可公开的浏览器 Key，**不要**贴进聊天、命令参数或仓库。后续无需重复配置；要更换 Key 时再运行 `configure`。无人值守部署时，可先通过可信的本地密钥管理方式设置临时环境变量，再用 `configure --base-url URL --key-env 变量名`；命令参数只写**变量名**，不写 Key 的值。
+Windows 11 PowerShell：用 `py -3 -m venv .venv` 创建环境，把上述 `.venv/bin/python` 换成 `.\.venv\Scripts\python.exe`，脚本路径改为 `scripts\image_gen_gateway.py`。
 
-CLI 将 `config.json`（URL 和可选的 Responses 宿主模型）及 `key`（私有 API Key）存在仓库**以外**：Linux/macOS 默认为 `${XDG_CONFIG_HOME:-~/.config}/gpt-image-2-skill/`，文件权限为 `0600`；Windows 默认为 `%LOCALAPPDATA%\gpt-image-2-skill\`，继承当前用户目录的 ACL。多个 Agent 共用同一个系统账号时，可通过 `IMAGE2_CONFIG_DIR` 指定各自的绝对路径；`IMAGE2_API_KEY` 可在单次调用时覆盖已保存的 Key。不要把这个 Key 与 Agent 聊天模型的 Key 混用。
+## 模型选择和用法
 
-如需作为 Agent Skill 安装，把仓库目录放到 Agent 能发现 `SKILL.md` 的 skills 路径中。Agent 必须能在本机执行脚本并访问你配置的中转站；克隆仓库不会转移本地凭据。Agent 的操作流程见 [SKILL.md](SKILL.md)。
+`generate`、`edit`、`generate-batch` 默认 `--model auto`：
 
-## 命令
-
-下表中的 `image2` 是简写：在仓库目录下，Linux/macOS 用 `.venv/bin/python scripts/image_gen_gateway.py` 替换；Windows PowerShell 用 `.\.venv\Scripts\python.exe scripts\image_gen_gateway.py` 替换。
-
-| 命令 | 用途 |
-| --- | --- |
-| `image2 configure --base-url https://YOUR-GATEWAY.example/v1` | 首次保存 URL，并在终端私密输入 Key；可用 `--host-model` 设置 Responses 宿主模型 |
-| `image2 status` | 查看已配置的 URL 及是否有 Key，不输出 Key |
-| `image2 generate --prompt '...' --out ./output/new.png` | 通过 Images API 文生图 |
-| `image2 edit --image ./source.png --prompt '...' --out ./output/edited.png` | 编辑本地图片；可重复传入 `--image` 加参考图，或使用 `--mask` |
-| `image2 generate-batch --input ./jobs.jsonl --out-dir ./output/batch` | 按 JSONL 任务文件批量生成 |
-| `image2 tool --prompt '...' --out ./output/tool.png` | 经 Responses API 使用托管生图工具；取决于中转站是否支持 |
-
-`tool` 需要中转站支持的 **Responses 宿主模型**，它与固定使用的图片模型 `gpt-image-2` 不同。可通过 `configure --host-model MODEL` 或 `tool --mainline-model MODEL` 设置；默认的 `gpt-6-astra` 来自最初部署的环境，其他中转站未必提供。CLI 还支持流式输出、局部预览、透明背景、格式转换与缩图；详情运行 `image2 子命令 --help` 并查看[命令参考](references/gateway-image2.md)。续改图片时，建议把上次生成的文件重新作为 `--image` 传入；**仅凭历史 Response ID** 和 **File ID 上传** 并非在所有中转站都可用。
-
-## 验证与限制
-
-Linux/macOS：
+- 单张正式成图／精修优先 **Sunburst**；快稿加 `--quality low` 或明确指定 **Flare**；未指定型号的批量任务默认偏 **Flare**。
+- 只有 Image 2 时用 `gpt-image-2`；只开通一种 2.5 时选择那一种。用户明确 `--model` 优先，失败也**不暗中换型号**。
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -q
+.venv/bin/python scripts/image_gen_gateway.py generate --prompt 'A tiny leaf' --quality low --out ./output/draft.png
+.venv/bin/python scripts/image_gen_gateway.py generate --model gpt-image-2.5-sunburst --quality xhigh --prompt 'Detailed watercolor leaf' --out ./output/final.png
+.venv/bin/python scripts/image_gen_gateway.py edit --image ./source.png --image ./reference.png --mask ./mask.png --prompt 'Change the leaf color' --out ./output/edit.png
+.venv/bin/python scripts/image_gen_gateway.py generate-batch --input ./jobs.jsonl --out-dir ./output/batch
+.venv/bin/python scripts/image_gen_gateway.py tool --mainline-model YOUR_SUPPORTED_TEXT_MODEL --image ./source.png --action edit --prompt 'Recolor it' --out ./output/tool-edit.png
 ```
 
-Windows PowerShell：
+`--mask` 应为和**第一张输入图的实际尺寸**一致的带 Alpha PNG；透明区域是编辑引导，不能保证像素级严格不变。多次传 `--image` 可带参考图；`--n` 使用多个单图请求，防止网关返回张数不足。2.5 新增 `--quality xhigh|max`。还支持 PNG/JPEG/WebP 输出、透明、定制尺寸、压缩、流式输出（局部预览不保证）、本地缩图。见 [SKILL.md](SKILL.md) 和 [完整命令参考](references/gateway-image2.md)。
 
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -q
+`tool` 是**独立的 Responses API 图片工具路径**：顶层文本宿主模型不同于图片工具型号，且要求中转站额外支持。普通生图/改图优先走 Images API。连续编辑须把上一张输出重新用 `--image` 传入；单靠历史 Response ID / File ID 不保证可用。
+
+## 验收范围
+
+离线测试同时在 Ubuntu/Windows CI 执行；本地用隔离配置测试，避免借用已有私密配置：
+
+```bash
+XDG_CONFIG_HOME=/tmp/image-skill-clean-test .venv/bin/python -m unittest discover -s tests -q
 ```
 
-这些是**离线测试**，只验证 CLI 与配置逻辑，不能证明你的中转站实际支持生图。首次配置后，请在自己的中转站生成一张小图并检查文件。Images API 与 Responses API 是两条不同链路，必须分别以实际结果判断；不同中转站可能返回与请求不同的尺寸或更少的预览图。命令参考中原始部署的验收结果，不保证适用于其他中转站。仓库 CI 已在 Windows 与 Ubuntu 的 Python 3.11/3.12 上运行离线测试；尚未在 Win11 实机做中转站生图验收。
+Windows PowerShell 可在新的私有配置目录下运行 `.\.venv\Scripts\python.exe -m unittest discover -s tests -q`。**单测不能证明其他中转站可用**。原站分别实测两款 2.5 的直调生图/改图、遮罩＋参考图、透明输出、`xhigh/max`、批量、流式最终图；Sunburst 的 Responses 图片工具生成/改图也产出图片。但不同站、不同参数组合仍需各自验收。实际返回尺寸可能不同于请求，WebP 可能是本地对 PNG 的可靠转换，流式可能没有中间预览。原站的 File ID 上传和“仅凭 Response ID 续改”未打通；Flare 的 Responses 工具路径未独立实测。未声称已验证上游 C2PA 具体模型标识。
 
-本项目与 OpenAI 没有关联，也未获其背书。文中模型名仅用于说明中转站兼容性，不表示模型一定可用或你拥有使用资格。不要向仓库提交 API Key、本机配置、私有生成图片或下载的输入图片。
+本项目与 OpenAI 无隶属或背书关系，型号名称仅标识协议兼容，不保证你的网关已开通。不要提交 Key、私有配置、输入图片或私人产物。
 
-## 贡献与许可
+## 贡献、授权和来源
 
-贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)。项目采用 [Apache-2.0 许可证](LICENSE)。部分提示词与缩略图辅助代码改编自同为 Apache-2.0 许可的 OpenAI imagegen skill，归属与修改说明见 [NOTICE](NOTICE)。OpenAI SDK 和 Pillow 是运行依赖，各自遵循其许可证。
+见 [CONTRIBUTING.md](CONTRIBUTING.md)。仓库代码使用 [Apache-2.0](LICENSE)；部分提示词和缩图辅助逻辑源自 Apache-2.0 授权的 OpenAI imagegen skill，见 [NOTICE](NOTICE)。OpenAI SDK 与 Pillow 依各自许可证。

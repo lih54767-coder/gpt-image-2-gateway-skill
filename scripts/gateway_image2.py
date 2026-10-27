@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gateway-only GPT Image 2 CLI. Never logs credentials, image bytes or API bodies."""
+"""Gateway-only GPT Image 2 / 2.5 CLI. Never logs credentials, image bytes or API bodies."""
 from __future__ import annotations
 
 import argparse
@@ -21,7 +21,9 @@ from urllib.parse import urlsplit
 from PIL import Image, UnidentifiedImageError
 from gateway_prompt import _augment_prompt, _derive_downscale_path, _downscale_image_bytes
 
-MODEL = 'gpt-image-2'
+MODEL = 'gpt-image-2'  # Legacy Image 2 fallback when the gateway advertises no 2.5.
+AUTO_MODEL = 'auto'  # Default: detect the gateway's models and pick by intent.
+MODELS = ('gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst')
 SIZES = {'1024x1024', '1536x1024', '1024x1536'}
 FORMATS = {'png': 'PNG', 'jpeg': 'JPEG', 'webp': 'WEBP'}
 EXTENSIONS = {'png': {'.png'}, 'jpeg': {'.jpg', '.jpeg'}, 'webp': {'.webp'}}
@@ -174,6 +176,37 @@ def _write_private(path: Path, data: str) -> None:
             os.unlink(tmp)
 
 
+def _probe_models(base_url: str, key: str) -> set[str]:
+    """Read advertised image models; never infer absence from an API error."""
+    from openai import OpenAI
+    api = OpenAI(api_key=key, base_url=base_url, max_retries=0, timeout=15)
+    rows = api.models.list().data
+    if not isinstance(rows, list):
+        raise ValueError('gateway model list is invalid; configure made no changes')
+    return {row.id for row in rows if isinstance(getattr(row, 'id', None), str) and row.id in MODELS}
+
+
+def _resolve_model(model: str, intent: str = 'final') -> str:
+    if model in MODELS:
+        return model  # Explicit choices are never silently substituted.
+    if model != 'auto':
+        raise ValueError('unsupported image model')
+    config = _saved_config()
+    models = config.get('available_models')
+    if not isinstance(models, list) or not all(isinstance(item, str) and item in MODELS for item in models):
+        models = sorted(_probe_models(config['base_url'], _credential()))
+        if not models:
+            raise ValueError('gateway lists no supported image model; not falling back')
+        config['available_models'] = models
+        _write_private(_config_dir() / 'config.json', json.dumps(config, ensure_ascii=False) + '\n')
+    preferred = (('gpt-image-2.5-flare', 'gpt-image-2.5-sunburst') if intent == 'draft'
+                 else ('gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'))
+    for candidate in (*preferred, MODEL):
+        if candidate in models:
+            return candidate
+    raise ValueError('gateway lists no supported image model; not falling back')
+
+
 def _configure(args: argparse.Namespace) -> int:
     base_url = _base_url(args.base_url)
     if args.key_env:
@@ -188,13 +221,16 @@ def _configure(args: argparse.Namespace) -> int:
         key = getpass.getpass('Image 2 gateway key (hidden): ')
         if not key:
             raise ValueError('empty key; configure made no changes')
+    available = sorted(_probe_models(base_url, key.strip()))
+    if not available:
+        raise ValueError('gateway lists no supported image model; configure made no changes')
     directory = _config_dir()
     _write_private(directory / 'key', key.strip() + '\n')
-    config = {'base_url': base_url}
+    config = {'base_url': base_url, 'available_models': available}
     if args.host_model:
         config['host_model'] = args.host_model
     _write_private(directory / 'config.json', json.dumps(config, ensure_ascii=False) + '\n')
-    print('Image 2 gateway configured (key hidden).')
+    print('Image gateway configured (key hidden); detected_models=' + ','.join(available))
     return 0
 
 
@@ -203,7 +239,7 @@ def _status() -> int:
     config = _saved_config()
     has_key = bool(os.environ.get('IMAGE2_API_KEY') or
                    ((directory / 'key').is_file() and (directory / 'key').read_text().strip()))
-    print(f'gateway={config["base_url"]} model={MODEL} key={"available" if has_key else "missing"}'
+    print(f'gateway={config["base_url"]} default_model=auto available_models={",".join(config.get("available_models", [])) or "unchecked"} key={"available" if has_key else "missing"}'
           f' host_model={config.get("host_model", "unset")}')
     return 0
 
@@ -247,17 +283,24 @@ def _outputs(args: argparse.Namespace, fmt: str) -> list[Path]:
 
 
 def _payload(args: argparse.Namespace) -> dict[str, Any]:
+    if args.model == AUTO_MODEL:
+        args.model = _resolve_model(AUTO_MODEL, 'draft' if getattr(args, 'intent', 'final') == 'draft' or args.quality == 'low' else 'final')
+    if args.model not in MODELS:
+        raise ValueError('model must be gpt-image-2, gpt-image-2.5-flare or gpt-image-2.5-sunburst')
     validate_size(args.size)
     fmt = validate_output(args.background, args.output_format, args.output_compression)
-    if args.quality not in ('auto', 'low', 'medium', 'high') or not 1 <= args.n <= 10:
-        raise ValueError('quality must be auto/low/medium/high; n must be 1..10')
+    qualities = ('auto', 'low', 'medium', 'high', 'xhigh', 'max') if args.model != MODEL else ('auto', 'low', 'medium', 'high')
+    if args.quality not in qualities:
+        raise ValueError('quality must be auto/low/medium/high; xhigh/max require Image 2.5')
+    if not 1 <= args.n <= 10:
+        raise ValueError('n must be 1..10')
     if args.moderation not in (None, 'auto', 'low'):
         raise ValueError('moderation must be auto or low')
     if not 0 <= args.partial_images <= 3 or (args.partial_images and not args.stream):
         raise ValueError('partial-images requires --stream and value 0..3')
     if args.stream and args.n > 1:
         raise ValueError('stream with n>1 is not supported on this gateway; use separate calls')
-    payload = dict(model=MODEL, prompt=_prompt(args), n=args.n, size=args.size,
+    payload = dict(model=args.model, prompt=_prompt(args), n=args.n, size=args.size,
                    quality=args.quality, output_format=fmt)
     for key in ('background', 'output_compression', 'moderation'):
         if getattr(args, key) is not None:
@@ -387,6 +430,8 @@ def _parser() -> argparse.ArgumentParser:
     configure.add_argument('--host-model', help='optional Responses host model for the tool subcommand')
     subs.add_parser('status', help='show gateway address and key availability, never key value')
     tool = subs.add_parser('tool', help='Responses API image tool (requires compatible mainline model)')
+    tool.add_argument('--model', choices=(*MODELS, AUTO_MODEL), default=AUTO_MODEL,
+                      help='image tool model; auto detects gateway capability')
     tool.add_argument('--prompt', required=True)
     tool.add_argument('--image', action='append', default=[], help='local PNG/JPEG/WEBP, repeatable')
     tool.add_argument('--image-url', action='append', default=[], help='HTTPS image URL; provider must fetch it')
@@ -395,7 +440,7 @@ def _parser() -> argparse.ArgumentParser:
     tool.add_argument('--mainline-model', help='Responses host model; defaults to configured host model or gpt-6-astra')
     tool.add_argument('--action', choices=('auto', 'generate', 'edit'))
     tool.add_argument('--size')
-    tool.add_argument('--quality', choices=('auto', 'low', 'medium', 'high'))
+    tool.add_argument('--quality', choices=('auto', 'low', 'medium', 'high', 'xhigh', 'max'))
     tool.add_argument('--background')
     tool.add_argument('--output-format')
     tool.add_argument('--output-compression', type=int)
@@ -406,6 +451,8 @@ def _parser() -> argparse.ArgumentParser:
     tool.add_argument('--partial-images', type=int, default=0, help='0..3 preview frames (not guaranteed)')
     for name in ('generate', 'edit', 'generate-batch'):
         p = subs.add_parser(name)
+        p.add_argument('--model', choices=(*MODELS, AUTO_MODEL), default=AUTO_MODEL,
+                       help='image model; auto detects gateway capability, explicit value wins')
         p.add_argument('--prompt')
         p.add_argument('--prompt-file')
         p.add_argument('--size', default='1024x1024')
@@ -447,7 +494,7 @@ def _batch(args: argparse.Namespace, client=None) -> int:
     if not 1 <= len(rows) <= 500:
         raise ValueError('batch requires 1..500 jobs')
     jobs = []
-    allowed = {'prompt', 'size', 'quality', 'n', 'background', 'output_format', 'output_compression',
+    allowed = {'prompt', 'model', 'size', 'quality', 'n', 'background', 'output_format', 'output_compression',
                'moderation', 'out', 'augment', 'use_case', 'scene', 'subject', 'style',
                'composition', 'lighting', 'palette', 'materials', 'text', 'constraints',
                'negative', 'downscale_max_dim', 'downscale_suffix'}
@@ -458,6 +505,7 @@ def _batch(args: argparse.Namespace, client=None) -> int:
             raise ValueError(f'job {i}: invalid fields')
         job = argparse.Namespace(**vars(args))
         job.command, job.prompt_file, job.out_dir = 'generate', None, None
+        job.intent = 'draft'  # Unspecified batch compositions prefer Flare, even at auto quality.
         for key, value in item.items():
             setattr(job, key, value)
         fmt = validate_output(job.background, job.output_format, job.output_compression)
@@ -487,6 +535,10 @@ def _batch(args: argparse.Namespace, client=None) -> int:
 
 
 def _run_tool(args: argparse.Namespace, client=None) -> int:
+    if args.model == AUTO_MODEL:
+        args.model = _resolve_model(AUTO_MODEL, 'final')
+    if args.quality in ('xhigh', 'max') and args.model == MODEL:
+        raise ValueError('xhigh/max require Image 2.5')
     host_model = args.mainline_model or (_saved_config().get('host_model') if client is None else None) or 'gpt-6-astra'
     fmt = validate_output(args.background, args.output_format or 'png', args.output_compression)
     if not 0 <= args.partial_images <= 3 or (args.partial_images and not args.stream):
@@ -524,7 +576,7 @@ def _run_tool(args: argparse.Namespace, client=None) -> int:
         if not file_id.strip():
             raise ValueError('file ID cannot be empty')
         content.append({'type': 'input_image', 'file_id': file_id})
-    tool = {'type': 'image_generation', 'model': MODEL}
+    tool = {'type': 'image_generation', 'model': args.model}
     for key in ('action', 'size', 'quality', 'background', 'output_compression'):
         if getattr(args, key) is not None:
             tool[key] = getattr(args, key)

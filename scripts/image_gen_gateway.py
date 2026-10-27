@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gateway-only GPT Image 2 entrypoint (the official bundled CLI remains unmodified)."""
+"""Gateway-only Image 2 / 2.5 entrypoint (the official bundled CLI remains unmodified)."""
 from gateway_image2 import main
 import sys
 
